@@ -325,8 +325,12 @@ async def tenants():
                 select(AuditEvent.tenant_id).distinct()
             )
             return sorted(row[0] for row in result.all())
+
     except Exception as exc:
-        print(f"[api/tenants] DATABASE ERROR: {type(exc).__name__}: {exc}")
+        print(
+            f"[api/tenants] ERROR: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
         raise HTTPException(
             status_code=500,
             detail=f"{type(exc).__name__}: {exc}",
