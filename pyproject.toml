@@ -40,4 +40,4 @@ include = ["gateway*", "policy*", "ledger*", "detectors*", "bench*", "console*"]
 
 
 [tool.vercel]
-entrypoint = "gateway.main:app"
+entrypoint = "console.backend.main:app"
