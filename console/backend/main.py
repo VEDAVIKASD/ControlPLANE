@@ -317,25 +317,31 @@ def create_app(*, engine: AsyncEngine | None = None) -> FastAPI:
             for policy in loaded.values()
         ]
 
-@app.get("/api/tenants")
-async def tenants():
-    try:
-        async with app.state.sessionmaker() as session:
-            result = await session.execute(
-                select(AuditEvent.tenant_id).distinct()
+
+
+    
+    @app.get("/api/tenants")
+    async def tenants():
+        try:
+            async with app.state.sessionmaker() as session:
+                result = await session.execute(
+                    select(AuditEvent.tenant_id).distinct()
+                )
+                return sorted(row[0] for row in result.all())
+
+        except Exception as exc:
+            print(
+                f"[api/tenants] ERROR: {type(exc).__name__}: {exc}",
+                flush=True,
             )
-            return sorted(row[0] for row in result.all())
+            raise HTTPException(
+                status_code=500,
+                detail=f"{type(exc).__name__}: {exc}",
+            ) from exc
 
-    except Exception as exc:
-        print(
-            f"[api/tenants] ERROR: {type(exc).__name__}: {exc}",
-            flush=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"{type(exc).__name__}: {exc}",
-        ) from exc
 
+
+    
     @app.get("/api/risk-appetite/{tenant}")
     async def get_risk_appetite(tenant: str):
         async with app.state.sessionmaker() as session:
