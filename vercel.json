@@ -3,7 +3,13 @@
   "services": {
     "controlplane-gateway": {
       "root": "gateway",
-      "framework": "fastapi"
+      "framework": "fastapi",
+      "entrypoint": "main:app"
+    },
+    "console-api": {
+      "root": "console/backend",
+      "framework": "fastapi",
+      "entrypoint": "main:app"
     },
     "frontend": {
       "root": "console/frontend",
@@ -18,7 +24,7 @@
     {
       "source": "/api/(.*)",
       "destination": {
-        "service": "controlplane-gateway"
+        "service": "console-api"
       }
     },
     {
