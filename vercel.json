@@ -2,9 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "controlplane-gateway": {
-      "root": ".",
-      "framework": "fastapi",
-      "entrypoint": "gateway/main.py"
+      "root": "gateway",
+      "framework": "fastapi"
     },
     "frontend": {
       "root": "console/frontend",
