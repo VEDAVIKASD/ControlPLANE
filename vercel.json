@@ -4,7 +4,7 @@
     "controlplane-gateway": {
       "root": ".",
       "framework": "fastapi",
-      "buildCommand": "pip install ."
+      "entrypoint": "gateway/main.py"
     },
     "frontend": {
       "root": "console/frontend",
@@ -17,9 +17,21 @@
   },
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/api/(.*)",
       "destination": {
         "service": "controlplane-gateway"
+      }
+    },
+    {
+      "source": "/app/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "showcase"
       }
     }
   ]
