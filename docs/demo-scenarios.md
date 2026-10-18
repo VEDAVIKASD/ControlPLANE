@@ -189,3 +189,31 @@ review targets, the agreement-rate computation, and both the
 **See it live:** run the console (`README.md`'s "Running the console"
 section), open a request's drawer, and click Agree/Disagree — the Human
 Review panel above updates immediately, no page reload.
+
+## Console audit-ledger seed demo
+
+The governance console includes a **Load Demo Data** action backed by `POST /api/demo/seed`.
+It appends 12 clearly labelled illustrative request records (and associated claim records)
+for the existing `customer_support`, `internal_copilot`, and `regulated_agent` tenant IDs.
+The rows are written through `AuditLedger`, so they use the same hash-chain writer as other
+ledger events and then appear through the normal `/api/summary`, `/api/events`, `/api/tenants`,
+and event-detail APIs.
+
+The endpoint is idempotent: after the first seed it reports that demo data is already present
+rather than duplicating the starter dataset. The ledger is append-only, so there is intentionally
+no demo-reset endpoint that deletes audit history. These are labelled illustrative records, not
+live requests sent to an LLM and not proof that a live model executed the shown governance actions.
+
+## Console audit-ledger seed demo
+
+The governance console includes a **Load Demo Data** action backed by `POST /api/demo/seed`.
+It appends 12 clearly labelled illustrative request records (and associated claim records)
+for the existing `customer_support`, `internal_copilot`, and `regulated_agent` tenant IDs.
+The rows are written through `AuditLedger`, so they use the same hash-chain writer as other
+ledger events and then appear through the normal `/api/summary`, `/api/events`, `/api/tenants`,
+and event-detail APIs.
+
+The endpoint is idempotent: after the first seed it reports that demo data is already present
+rather than duplicating the starter dataset. The ledger is append-only, so there is intentionally
+no demo-reset endpoint that deletes audit history. These are labelled illustrative records, not
+live requests sent to an LLM and not proof that a live model executed the shown governance actions.
