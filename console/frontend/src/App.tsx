@@ -20,6 +20,8 @@ export default function App() {
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedbackRefreshKey, setFeedbackRefreshKey] = useState(0);
+  const [seedingDemo, setSeedingDemo] = useState(false);
+  const [demoMessage, setDemoMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -49,6 +51,22 @@ export default function App() {
     setOffset(0);
   }, [tenant]);
 
+  async function loadDemoData() {
+    setSeedingDemo(true);
+    setDemoMessage(null);
+    try {
+      const result = await api.seedDemo();
+      setDemoMessage(result.message + (result.note ? ` ${result.note}` : ""));
+      const nextTenants = await api.tenants();
+      setTenants(nextTenants);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSeedingDemo(false);
+    }
+  }
+
   async function openDetail(requestId: string) {
     try {
       setDetail(await api.eventDetail(requestId));
@@ -72,7 +90,10 @@ export default function App() {
             <p>Live, tamper-evident audit ledger stream & policy calibration engine</p>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button className="demo-button" onClick={loadDemoData} disabled={seedingDemo}>
+            {seedingDemo ? "Loading demo…" : "▶ Load Demo Data"}
+          </button>
           <span className="status-badge">
             <span className="pulse-dot" /> Audit Ledger Active
           </span>
@@ -92,6 +113,8 @@ export default function App() {
           ⚠️ Could not connect to Audit Ledger API: {error}. Make sure <code>console/backend</code> is running on port 8001.
         </div>
       )}
+
+      {demoMessage && <div className="demo-banner">{demoMessage}</div>}
 
       <SummaryCards summary={summary} />
 
