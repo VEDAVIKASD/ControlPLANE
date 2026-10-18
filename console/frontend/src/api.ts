@@ -23,6 +23,8 @@ async function writeJSON<T>(method: "PUT" | "POST", path: string, body: unknown)
 export const api = {
   tenants: () => getJSON<string[]>("/api/tenants"),
 
+  seedDemo: () => writeJSON<{ status: string; message: string; requests_created?: number; demo_event_rows?: number; note?: string }>("POST", "/api/demo/seed", {}),
+
   summary: (tenant?: string) =>
     getJSON<Summary>(`/api/summary${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
 
