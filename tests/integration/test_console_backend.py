@@ -285,3 +285,38 @@ def test_demo_request_succeeds_even_if_visitor_confirmation_fails(tmp_path, monk
     # best-effort visitor confirmation failed.
     assert response.status_code == 201
     assert calls == ["sales@example.com", "ada@example.com"]
+
+
+def test_demo_seed_appends_labelled_events_and_is_idempotent(tmp_path):
+    import asyncio
+
+    from ledger.db import init_models
+
+    db_path = tmp_path / "audit.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+
+    async def initialize_schema():
+        await init_models(engine)
+        await engine.dispose()
+
+    asyncio.run(initialize_schema())
+    with _console_client(db_path) as client:
+        first = client.post("/api/demo/seed", json={})
+        assert first.status_code == 200
+        assert first.json()["status"] == "seeded"
+        assert first.json()["requests_created"] == 12
+
+        summary = client.get("/api/summary").json()
+        assert summary["total_requests"] == 12
+        assert sum(summary["decision_counts"].values()) == 12
+
+        second = client.post("/api/demo/seed", json={})
+        assert second.status_code == 200
+        assert second.json()["status"] == "already_loaded"
+
+        tenants = client.get("/api/tenants").json()
+        assert set(tenants) == {"customer_support", "internal_copilot", "regulated_agent"}
+
+        events = client.get("/api/events?limit=100").json()
+        assert len(events) == 12
+        assert all(row["request_id"].startswith("demo-seed-") for row in events)
