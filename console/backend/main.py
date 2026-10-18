@@ -291,6 +291,89 @@ def create_app(*, engine: AsyncEngine | None = None) -> FastAPI:
 
         return {"status": "received"}
 
+    @app.post("/api/demo/seed")
+    async def seed_demo_data():
+        """Append a small, clearly labelled demo workload to the real audit ledger.
+
+        Demo rows use the same AuditLedger writer as gateway rows, so their
+        hashes chain into the existing ledger. The endpoint is idempotent: it
+        does not repeatedly append the same starter dataset. Because the ledger
+        is append-only, this endpoint deliberately does not offer destructive reset.
+        """
+        demo_tenants = {
+            "customer_support": "customer_support",
+            "internal_copilot": "internal_copilot",
+            "regulated_agent": "regulated_agent",
+        }
+        scenarios = [
+            ("customer_support", "ALLOW", 42.0, "The support team is available Monday to Friday.", "SUPPORTED", "ALLOW", None),
+            ("customer_support", "MODIFY", 68.0, "The customer's email address is user@example.com.", "SUPPORTED", "REDACT", {"pii": {"detected": True, "score": 0.96, "evaluated": True}}),
+            ("customer_support", "ESCALATE", 151.0, "The refund will definitely arrive tomorrow.", "UNVERIFIABLE", "HEDGE", {"hallucination": {"detected": True, "score": 0.64, "evaluated": True}}),
+            ("customer_support", "BLOCK", 88.0, "Use this stolen credit card number: 4111111111111111.", "UNVERIFIABLE", "BLOCK", {"pii": {"detected": True, "score": 0.99, "evaluated": True}}),
+            ("internal_copilot", "ALLOW", 73.0, "The onboarding guide lists three approval stages.", "SUPPORTED", "ALLOW", None),
+            ("internal_copilot", "MODIFY", 96.0, "The project may launch next week, but this is not confirmed.", "UNVERIFIABLE", "HEDGE", {"hallucination": {"detected": True, "score": 0.43, "evaluated": True}}),
+            ("internal_copilot", "ESCALATE", 182.0, "The internal report confirms a 40% cost reduction.", "UNVERIFIABLE", "ESCALATE", {"hallucination": {"detected": True, "score": 0.72, "evaluated": True}}),
+            ("regulated_agent", "ALLOW", 214.0, "The verified record shows the payment is pending.", "SUPPORTED", "ALLOW", None),
+            ("regulated_agent", "ESCALATE", 640.0, "The customer qualifies for a $900 refund.", "UNVERIFIABLE", "ESCALATE", {"hallucination": {"detected": True, "score": 0.78, "evaluated": True}}),
+            ("regulated_agent", "BLOCK", 392.0, "Send funds to the unverified bank account now.", "UNVERIFIABLE", "BLOCK", {"tool_risk": {"detected": True, "score": 0.93, "evaluated": True}}),
+            ("regulated_agent", "MODIFY", 305.0, "Account ending in 1234 has a pending review.", "SUPPORTED", "REDACT", {"pii": {"detected": True, "score": 0.81, "evaluated": True}}),
+            ("customer_support", "ALLOW", 51.0, "The return window is 30 days according to the published policy.", "SUPPORTED", "ALLOW", None),
+        ]
+        async with app.state.sessionmaker() as session:
+            existing = await session.execute(
+                select(AuditEvent.id).where(AuditEvent.request_id.like("demo-seed-%")).limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                count_result = await session.execute(
+                    select(AuditEvent.id).where(AuditEvent.request_id.like("demo-seed-%"))
+                )
+                return {
+                    "status": "already_loaded",
+                    "message": "Demo data is already present; no duplicate rows were added.",
+                    "demo_event_rows": len(count_result.all()),
+                    "requests_created": len(scenarios),
+                }
+
+            ledger = AuditLedger(session)
+            for index, (tenant_id, decision, latency, claim_text, verdict, remediation, labels) in enumerate(scenarios, 1):
+                request_id = f"demo-seed-{index:03d}"
+                await ledger.record(AuditRecord(
+                    request_id=request_id,
+                    tenant_id=tenant_id,
+                    policy_name=demo_tenants[tenant_id],
+                    decision=decision,
+                    conversation_id=f"demo-conversation-{index:03d}",
+                    turn_id=1,
+                    latency_ms=latency,
+                    action={"source": "demo_seed", "scenario": "illustrative_governance_event"},
+                ))
+                if verdict or labels:
+                    await ledger.record(AuditRecord(
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        policy_name=demo_tenants[tenant_id],
+                        decision=decision,
+                        kind="claim",
+                        conversation_id=f"demo-conversation-{index:03d}",
+                        turn_id=1,
+                        claim_id=f"demo-claim-{index:03d}",
+                        claim_text=claim_text,
+                        verdict=verdict,
+                        risk_labels=labels,
+                        provenance={"source": "demo_seed", "note": "Illustrative demo evidence; not a live model verification."},
+                        taint_status="TAINTED" if decision in {"ESCALATE", "BLOCK"} else "CLEAR",
+                        remediation=remediation,
+                        latency_ms=latency,
+                    ))
+            await session.commit()
+        return {
+            "status": "seeded",
+            "message": "Illustrative demo events were appended to the audit ledger.",
+            "requests_created": len(scenarios),
+            "tenants": sorted(demo_tenants),
+            "note": "These are labelled demo records, not live model traffic.",
+        }
+
     @app.get("/api/policies")
     async def policies():
         """Tenant policy profiles as loaded from configs/*.yaml (policy/loader.py) --
