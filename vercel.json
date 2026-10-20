@@ -22,6 +22,18 @@
   },
   "rewrites": [
     {
+      "source": "/healthz",
+      "destination": {
+        "service": "controlplane-gateway"
+      }
+    },
+    {
+      "source": "/v1/(.*)",
+      "destination": {
+        "service": "controlplane-gateway"
+      }
+    },
+    {
       "source": "/api/(.*)",
       "destination": {
         "service": "console-api"
