@@ -243,7 +243,11 @@ async def chat_completions(request: Request):
 
     # --- Tool-call gating (Scene 7 -- the critical one). ---
     tool_decisions: list[ToolCallDecision] = []
-    decision_value = governance.decision if governance else Decision.ALLOW
+    decision_value = (
+    governance.decision
+    if governance is not None
+    else Decision.BLOCK
+)
 
     if error is None:
         message = _message(upstream_response)
