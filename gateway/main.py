@@ -24,6 +24,7 @@ from detectors.hallucination.corpus import load_corpus
 from gateway.middleware.cost_breaker import CostBreaker
 from gateway.providers.base import Provider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider
+from gateway.providers.antigravity import AntigravityProvider
 from gateway.routes.chat import router as chat_router
 from ledger.db import get_engine, get_sessionmaker, init_models
 from policy.engine import GovernanceEngine
