@@ -109,11 +109,14 @@ def normalize_database_url(url: str | None) -> str:
 
 
 def get_database_url() -> str:
-    """Return the normalized DATABASE_URL."""
+    """Return the normalized database URL."""
 
-    return normalize_database_url(
-        os.environ.get("DATABASE_URL")
+    database_url = (
+        os.environ.get("CONTROLPLANE_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
     )
+
+    return normalize_database_url(database_url)
 
 
 def get_engine(database_url: str | None = None) -> AsyncEngine:
