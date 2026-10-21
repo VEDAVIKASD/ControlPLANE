@@ -51,7 +51,7 @@ cost_breaker:
 
 model_routing:
   enabled: true
-  cheap_model: gpt-4o-mini
-  escalation_model: gpt-4o
+  cheap_model: gemini-3.8-flash
+  escalation_model: gemini-3.8-flash
 
 fail_mode: fail_closed
