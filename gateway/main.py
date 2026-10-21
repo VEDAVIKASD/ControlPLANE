@@ -64,9 +64,38 @@ def create_app(
         if run_migrations:
             await init_models(app.state.engine)
 
-        app.state.provider = provider or OpenAICompatibleProvider(
-            base_url=os.environ.get("UPSTREAM_BASE_URL", "https://api.openai.com/v1"),
-            api_key=os.environ.get("UPSTREAM_API_KEY", ""),
+        if provider is not None:
+    app.state.provider = provider
+else:
+    provider_type = os.environ.get("UPSTREAM_PROVIDER", "openai_compatible").strip().lower()
+    api_key = os.environ.get("UPSTREAM_API_KEY", "")
+
+    if provider_type == "antigravity":
+        app.state.provider = AntigravityProvider(
+            api_key=api_key,
+            agent=os.environ.get(
+                "ANTIGRAVITY_AGENT",
+                "antigravity-preview-09-2026",
+            ),
+            model=os.environ.get("ANTIGRAVITY_MODEL") or None,
+            max_total_tokens=int(
+                os.environ.get("ANTIGRAVITY_MAX_TOTAL_TOKENS", "6000")
+            ),
+            timeout_s=float(
+                os.environ.get("ANTIGRAVITY_TIMEOUT_SECONDS", "120")
+            ),
+        )
+    elif provider_type == "openai_compatible":
+        app.state.provider = OpenAICompatibleProvider(
+            base_url=os.environ.get(
+                "UPSTREAM_BASE_URL",
+                "https://api.openai.com/v1",
+            ),
+            api_key=api_key,
+        )
+    else:
+        raise ValueError(
+            "UPSTREAM_PROVIDER must be 'antigravity' or 'openai_compatible'."
         )
 
         app.state.governance_engine = governance_engine or GovernanceEngine(
