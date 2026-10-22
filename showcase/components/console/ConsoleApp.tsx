@@ -247,7 +247,7 @@ export function ConsoleApp() {
         if (cancelled) return;
         setMode("live");
         setProbeError(null);
-        if (t.length) setTenants(t);
+        if (t.length) setTenants(Array.from(new Set([...TENANTS, ...t])));
         consoleApi.policies().then((p) => !cancelled && p.length && setPolicies(p)).catch(() => {});
       })
       .catch((err) => {
