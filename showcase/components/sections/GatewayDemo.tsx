@@ -28,6 +28,8 @@ type GatewayMetadata = {
   tool_calls?: Array<Record<string, unknown>>;
 };
 
+type AuditVerification = "not_checked" | "checking" | "confirmed" | "not_found" | "failed";
+
 type ChatResponse = {
   choices?: Array<{ message?: { role?: string; content?: string | null; tool_calls?: unknown[] } }>;
   model?: string;
@@ -72,6 +74,8 @@ export function GatewayDemo() {
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [httpStatus, setHttpStatus] = useState<number | null>(null);
+  const [auditVerification, setAuditVerification] = useState<AuditVerification>("not_checked");
+  const [auditMessage, setAuditMessage] = useState<string>("Audit persistence has not been checked yet.");
 
   const tenant = useMemo(() => TENANTS.find((item) => item.id === tenantId) ?? TENANTS[0], [tenantId]);
   const metadata = result?.controlplane;
@@ -87,6 +91,8 @@ export function GatewayDemo() {
     setError(null);
     setResult(null);
     setHttpStatus(null);
+    setAuditVerification("not_checked");
+    setAuditMessage("Audit persistence has not been checked yet.");
 
     try {
       const response = await fetch("/api/gateway/chat", {
@@ -111,6 +117,44 @@ export function GatewayDemo() {
         throw new Error("The response did not include ControlPlane request metadata. The response cannot be presented as a confirmed governed request.");
       }
       setResult(data);
+
+      // The gateway's request ID alone does not prove that its audit rows can
+      // be read back. Verify the exact ID against the existing console API.
+      setAuditVerification("checking");
+      setAuditMessage("Checking the audit ledger for this request…");
+      try {
+        const requestId = data.controlplane.request_id;
+        const auditResponse = await fetch(`/api/events/${encodeURIComponent(requestId)}`, {
+          method: "GET",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (auditResponse.ok) {
+          const auditPayload: unknown = await auditResponse.json().catch(() => null);
+          const auditRecord = auditPayload && typeof auditPayload === "object"
+            ? (auditPayload as Record<string, unknown>).request
+            : null;
+          const persistedId = auditRecord && typeof auditRecord === "object"
+            ? (auditRecord as Record<string, unknown>).request_id
+            : null;
+          if (persistedId === requestId) {
+            setAuditVerification("confirmed");
+            setAuditMessage("Confirmed: the audit API returned the persisted request record.");
+          } else {
+            setAuditVerification("failed");
+            setAuditMessage("The audit endpoint responded, but its record did not match this request ID.");
+          }
+        } else if (auditResponse.status === 404) {
+          setAuditVerification("not_found");
+          setAuditMessage("No audit record was found for this request ID. The gateway response is real, but persistence is not confirmed.");
+        } else {
+          setAuditVerification("failed");
+          setAuditMessage(`Audit verification failed with HTTP ${auditResponse.status}. The request result is shown, but persistence is unconfirmed.`);
+        }
+      } catch {
+        setAuditVerification("failed");
+        setAuditMessage("Could not reach the audit API. The gateway response is shown, but persistence is unconfirmed.");
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The request failed unexpectedly.");
     } finally {
@@ -247,7 +291,13 @@ export function GatewayDemo() {
 
               <GlassCard className="p-5 sm:p-6">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 size={15} className="text-emerald-300" aria-hidden />
+                  {auditVerification === "confirmed" ? (
+                    <CheckCircle2 size={15} className="text-emerald-300" aria-hidden />
+                  ) : auditVerification === "checking" ? (
+                    <LoaderCircle size={15} className="animate-spin text-amber-300" aria-hidden />
+                  ) : (
+                    <AlertCircle size={15} className="text-amber-300" aria-hidden />
+                  )}
                   <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">Request and audit metadata</p>
                 </div>
                 <dl className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -258,7 +308,20 @@ export function GatewayDemo() {
                   <div><dt className="text-[10px] uppercase tracking-[0.14em] text-white/35">Claims recorded</dt><dd className="mt-1 font-mono text-xs text-white/75">{metadata.claims?.length ?? 0}</dd></div>
                   <div><dt className="text-[10px] uppercase tracking-[0.14em] text-white/35">Injection detections</dt><dd className="mt-1 font-mono text-xs text-white/75">{metadata.injection_detections?.length ?? 0}</dd></div>
                   <div><dt className="text-[10px] uppercase tracking-[0.14em] text-white/35">Tool calls returned</dt><dd className="mt-1 font-mono text-xs text-white/75">{metadata.tool_calls?.length ?? 0}</dd></div>
-                  <div><dt className="text-[10px] uppercase tracking-[0.14em] text-white/35">Audit status</dt><dd className="mt-1 font-mono text-xs text-emerald-300">Request ID returned by gateway; persistence not independently verified by this UI</dd></div>
+                  <div className="sm:col-span-2">
+                    <dt className="text-[10px] uppercase tracking-[0.14em] text-white/35">Audit status</dt>
+                    <dd className={cn(
+                      "mt-1 font-mono text-xs",
+                      auditVerification === "confirmed" ? "text-emerald-300" :
+                      auditVerification === "checking" ? "text-amber-300" : "text-amber-200",
+                    )}>
+                      {auditVerification === "confirmed" ? "AUDIT CONFIRMED" :
+                       auditVerification === "checking" ? "AUDIT CHECKING" :
+                       auditVerification === "not_found" ? "AUDIT NOT FOUND" :
+                       auditVerification === "failed" ? "AUDIT UNVERIFIED" : "AUDIT NOT CHECKED"}
+                      <span className="mt-1 block font-sans text-white/55">{auditMessage}</span>
+                    </dd>
+                  </div>
                 </dl>
               </GlassCard>
 
