@@ -10,7 +10,14 @@ from gateway.providers.base import Provider, ProviderError
 
 
 class AntigravityProvider(Provider):
-    """Adapts the Antigravity Interactions API to ControlPlane's chat interface."""
+    """Adapts the Antigravity Interactions API to ControlPlane's chat interface.
+
+    Antigravity selects an agent, so model-routing requests cannot be assumed
+    to switch underlying models unless the upstream service confirms that.
+    """
+
+    provider_name = "antigravity"
+    supports_model_routing = False
 
     def __init__(
         self,
@@ -145,13 +152,31 @@ class AntigravityProvider(Provider):
             )
 
         now = int(time.time())
-        requested_model = self._model or self._agent
+        # The Interactions response identifies the agent, not necessarily the
+        # internal model selected by that agent. Keep those concepts separate.
+        response_agent = result.get("agent")
+        configured_model = self._model
+        upstream_usage = result.get("usage")
+        usage = upstream_usage if isinstance(upstream_usage, dict) else {}
+
+        def token_count(*keys: str) -> int:
+            for key in keys:
+                value = usage.get(key)
+                if isinstance(value, int) and value >= 0:
+                    return value
+            return 0
+
+        input_tokens = token_count("input_tokens", "prompt_tokens")
+        output_tokens = token_count("output_tokens", "completion_tokens")
+        total_tokens = token_count("total_tokens") or (input_tokens + output_tokens)
 
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
             "created": now,
-            "model": requested_model,
+            # OpenAI-compatible field; this is the configured agent/model label,
+            # not proof of the internal model used by Antigravity.
+            "model": configured_model or str(response_agent or self._agent),
             "choices": [
                 {
                     "index": 0,
@@ -163,8 +188,16 @@ class AntigravityProvider(Provider):
                 }
             ],
             "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            },
+            "provider_metadata": {
+                "provider": self.provider_name,
+                "agent": str(response_agent or self._agent),
+                "configured_model": configured_model,
+                "actual_model": None,
+                "model_identity_verified": False,
+                "usage_available": bool(usage),
             },
         }
