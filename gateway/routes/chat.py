@@ -37,6 +37,7 @@ from sqlalchemy import select
 
 from detectors.injection import detect_injection, is_untrusted_role, neutralize
 from gateway.middleware.cost_breaker import estimate_tokens
+from gateway.providers.synthetic_demo import SyntheticDemoProvider
 from gateway.providers.base import ProviderError
 from ledger.audit import AuditLedger, AuditRecord
 from ledger.models import TenantSetting
@@ -148,7 +149,11 @@ async def _call_model(provider, payload: dict, model: str | None) -> tuple[dict 
 
 
 @router.post("/v1/chat/completions")
+@router.post("/v1/demo/chat/completions")
 async def chat_completions(request: Request):
+    # The explicit demo route uses a local deterministic provider, but still
+    # runs through this same governance, remediation, and audit pipeline.
+    demo_mode = request.url.path.rstrip("/") == "/v1/demo/chat/completions"
     body = await request.json()
     if not isinstance(body, dict) or "messages" not in body:
         raise HTTPException(status_code=400, detail="request body must include 'messages'")
@@ -170,7 +175,7 @@ async def chat_completions(request: Request):
 
     # --- Cost circuit breaker (Scene 5): checked before any provider call. ---
     tokens = estimate_tokens(_prompt_text(body))
-    if not request.app.state.cost_breaker.check_and_record(tenant_id, tokens, policy.cost_breaker):
+    if not demo_mode and not request.app.state.cost_breaker.check_and_record(tenant_id, tokens, policy.cost_breaker):
         latency_ms = (time.perf_counter() - start) * 1000
         async with sessionmaker() as session:
             await AuditLedger(session).record(
@@ -188,7 +193,7 @@ async def chat_completions(request: Request):
         raise HTTPException(status_code=429, detail="rate/cost limit exceeded for this tenant")
 
     upstream_payload = {k: v for k, v in body.items() if k != "controlplane"}
-    provider = request.app.state.provider
+    provider = SyntheticDemoProvider() if demo_mode else request.app.state.provider
     governance_engine: GovernanceEngine = request.app.state.governance_engine
 
     # --- Input-side control (Scene 4): neutralize injection attempts in
@@ -201,12 +206,22 @@ async def chat_completions(request: Request):
 
     # --- Cheap-model reroute, validated by the governance engine (Scene 6). ---
     requested_model = upstream_payload.get("model")
+    routing_supported = bool(getattr(provider, "supports_model_routing", True))
     model_used = requested_model
     rerouted = False
 
-    first_model = policy.model_routing.cheap_model if policy.model_routing.enabled else requested_model
+    # A provider may not support changing models per request. In that case,
+    # do not claim that policy model selection changed the upstream model.
+    first_model = (
+        policy.model_routing.cheap_model
+        if policy.model_routing.enabled and routing_supported
+        else requested_model
+    )
     upstream_response, error = await _call_model(provider, upstream_payload, first_model)
-    model_used = first_model
+    if error is None and isinstance(upstream_response, dict):
+        model_used = upstream_response.get("model") or first_model
+    else:
+        model_used = first_model
     governance: GovernanceResult | None = None
     if error is None:
         content = _message_content(upstream_response)
@@ -216,6 +231,7 @@ async def chat_completions(request: Request):
     if (
         error is None
         and policy.model_routing.enabled
+        and routing_supported
         and governance is not None
         and governance.decision in (Decision.ESCALATE, Decision.BLOCK)
     ):
@@ -227,10 +243,11 @@ async def chat_completions(request: Request):
             escalated_governance = (
                 governance_engine.evaluate(content, policy, turn_id=turn_id) if content is not None else None
             )
+            first_response_model = upstream_response.get("model") if isinstance(upstream_response, dict) else None
             upstream_response = escalated_response
             governance = escalated_governance
-            model_used = policy.model_routing.escalation_model
-            rerouted = True
+            model_used = escalated_response.get("model") or policy.model_routing.escalation_model
+            rerouted = bool(first_response_model and model_used != first_response_model)
         # If the escalation call itself fails, we keep the cheap model's
         # (already flagged/remediated) response rather than losing the
         # turn entirely -- the flagged decision still applies below.
@@ -243,11 +260,7 @@ async def chat_completions(request: Request):
 
     # --- Tool-call gating (Scene 7 -- the critical one). ---
     tool_decisions: list[ToolCallDecision] = []
-    decision_value = (
-    governance.decision
-    if governance is not None
-    else Decision.BLOCK
-)
+    decision_value = governance.decision if governance else Decision.ALLOW
 
     if error is None:
         message = _message(upstream_response)
@@ -294,13 +307,26 @@ async def chat_completions(request: Request):
     latency_ms = (time.perf_counter() - start) * 1000
     decision = "ERROR" if error is not None else decision_value.value
 
-    request_action: dict = {}
-    if policy.model_routing.enabled:
-        request_action["model_used"] = model_used
-        request_action["rerouted"] = rerouted
+    provider_name = (
+        "synthetic" if demo_mode
+        else str(getattr(provider, "provider_name", type(provider).__name__))
+    )
+    provider_metadata = (
+        upstream_response.get("provider_metadata", {})
+        if isinstance(upstream_response, dict) else {}
+    )
+    request_action: dict = {"demo_mode": True, "provider": "synthetic"} if demo_mode else {
+        "provider": provider_name,
+        "model_used": model_used,
+        "routing_supported": routing_supported,
+        "rerouted": rerouted,
+    }
     if injection_detections:
         request_action["injection_detected"] = True
         request_action["injection_matches"] = injection_detections
+
+    if demo_mode:
+        model_used = "controlplane-synthetic-demo"
 
     async with sessionmaker() as session:
         ledger = AuditLedger(session)
@@ -371,6 +397,10 @@ async def chat_completions(request: Request):
         "turn_id": turn_id,
         "model_used": model_used,
         "rerouted": rerouted,
+        "routing_supported": routing_supported,
+        "demo_mode": demo_mode,
+        "provider": provider_name,
+        "provider_metadata": provider_metadata,
         "injection_detections": injection_detections,
         "claims": [
             {
