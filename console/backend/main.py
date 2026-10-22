@@ -405,32 +405,34 @@ def create_app(*, engine: AsyncEngine | None = None) -> FastAPI:
     
     @app.get("/api/tenants")
     async def tenants():
-        """Return configured tenants even before they have audit events."""
-        configured_tenants = set(app.state.policies.keys())
+        """Return configured tenants even when the audit ledger is empty.
+
+        The policy files are the source of truth for which tenants can be
+        governed. Audit rows are supplementary: a newly configured tenant
+        must not disappear just because it has not sent a request yet.
+        """
+        configured = set(load_all_policies().keys())
         try:
             async with app.state.sessionmaker() as session:
                 result = await session.execute(
-                    select(AuditEvent.tenant_id).distinct()
+                    select(AuditEvent.tenant_id).where(
+                        AuditEvent.tenant_id.is_not(None)
+                    ).distinct()
                 )
-                audited_tenants = {row[0] for row in result.all() if row[0]}
-            return sorted(configured_tenants | audited_tenants)
+                recorded = {row[0] for row in result.all() if row[0]}
         except Exception as exc:
+            # Keep the endpoint usable if the ledger query fails, while
+            # logging the actual database exception for deployment debugging.
             print(
-                f"[api/tenants] ERROR: {type(exc).__name__}: {exc}",
+                f"[api/tenants] audit query failed; returning configured tenants: "
+                f"{type(exc).__name__}: {exc}",
                 flush=True,
             )
-            # If the audit database is temporarily unavailable, still expose
-            # the tenants configured in this backend rather than an empty list.
-            if configured_tenants:
-                return sorted(configured_tenants)
-            raise HTTPException(
-                status_code=500,
-                detail=f"{type(exc).__name__}: {exc}",
-            ) from exc
+            recorded = set()
+
+        return sorted(configured | recorded)
 
 
-
-    
     @app.get("/api/risk-appetite/{tenant}")
     async def get_risk_appetite(tenant: str):
         async with app.state.sessionmaker() as session:
