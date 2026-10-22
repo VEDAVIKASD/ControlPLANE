@@ -405,13 +405,21 @@ def create_app(*, engine: AsyncEngine | None = None) -> FastAPI:
     
     @app.get("/api/tenants")
     async def tenants():
+        """Return configured tenant policies even before their first request.
+
+        The audit ledger is an activity log, not the source of tenant
+        configuration. Union configured policies with tenants seen in the
+        ledger so newly configured tenants appear in the console immediately,
+        while historical tenant IDs remain discoverable.
+        """
         try:
+            configured = set(load_all_policies().keys())
             async with app.state.sessionmaker() as session:
                 result = await session.execute(
                     select(AuditEvent.tenant_id).distinct()
                 )
-                return sorted(row[0] for row in result.all())
-
+                recorded = {row[0] for row in result.all() if row[0]}
+            return sorted(configured | recorded)
         except Exception as exc:
             print(
                 f"[api/tenants] ERROR: {type(exc).__name__}: {exc}",
