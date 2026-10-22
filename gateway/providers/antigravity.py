@@ -24,7 +24,7 @@ class AntigravityProvider(Provider):
         api_key: str,
         agent: str = "antigravity-preview-09-2026",
         model: str | None = None,
-        max_total_tokens: int = 6000,
+        max_total_tokens: int = 12000,
         timeout_s: float = 120.0,
     ):
         self._api_key = api_key.strip()
