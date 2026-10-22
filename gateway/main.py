@@ -1,15 +1,10 @@
 """ControlPlane gateway entrypoint.
 
-    uvicorn gateway.main:app --reload
-
-Loads all tenant policies from configs/, sets up the Postgres-backed audit
-ledger, and constructs the upstream provider from environment variables
-(see .env.example). create_app() takes explicit overrides so tests can
-inject a fake provider and an isolated (sqlite) engine instead of hitting a
-real database/LLM — see tests/integration/test_gateway_roundtrip.py.
+Loads tenant policies, initializes the audit ledger, and configures the
+upstream provider. Tests can inject a provider and database engine.
 """
 
-from __future__ import annotations
+from **future** import annotations
 
 import os
 from contextlib import asynccontextmanager
@@ -33,95 +28,103 @@ from policy.tools import load_tool_specs
 
 load_dotenv()
 
-
 def create_app(
-    *,
-    provider: Provider | None = None,
-    engine: AsyncEngine | None = None,
-    run_migrations: bool = False,
-    governance_engine: GovernanceEngine | None = None,
-    cost_breaker: CostBreaker | None = None,
+*,
+provider: Provider | None = None,
+engine: AsyncEngine | None = None,
+run_migrations: bool = False,
+governance_engine: GovernanceEngine | None = None,
+cost_breaker: CostBreaker | None = None,
 ) -> FastAPI:
-    """Build the FastAPI app.
+"""Build the ControlPlane gateway application."""
 
-    `provider`/`engine`/`governance_engine`/`cost_breaker` override the
-    defaults (real upstream provider, Postgres from DATABASE_URL, a
-    ClaimVerifier built from the real data/corpus/ docs, a fresh
-    per-process CostBreaker). `run_migrations=True` creates tables on the
-    given engine at startup — production applies ledger/schema.sql out of
-    band instead, so this is for tests/local dev only.
-    """
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        app.state.policies = load_all_policies()
-        app.state.default_tenant = os.environ.get("DEFAULT_TENANT", "customer_support")
-        app.state.tool_specs = load_tool_specs()
-
-        app.state.engine = engine or get_engine()
-        app.state.sessionmaker = get_sessionmaker(app.state.engine)
-
-        if run_migrations:
-            await init_models(app.state.engine)
-
-        if provider is not None:
-    app.state.provider = provider
-else:
-    provider_type = os.environ.get("UPSTREAM_PROVIDER", "openai_compatible").strip().lower()
-    api_key = os.environ.get("UPSTREAM_API_KEY", "")
-
-    if provider_type == "antigravity":
-        app.state.provider = AntigravityProvider(
-            api_key=api_key,
-            agent=os.environ.get(
-                "ANTIGRAVITY_AGENT",
-                "antigravity-preview-09-2026",
-            ),
-            model=os.environ.get("ANTIGRAVITY_MODEL") or None,
-            max_total_tokens=int(
-                os.environ.get("ANTIGRAVITY_MAX_TOTAL_TOKENS", "6000")
-            ),
-            timeout_s=float(
-                os.environ.get("ANTIGRAVITY_TIMEOUT_SECONDS", "120")
-            ),
-        )
-    elif provider_type == "openai_compatible":
-        app.state.provider = OpenAICompatibleProvider(
-            base_url=os.environ.get(
-                "UPSTREAM_BASE_URL",
-                "https://api.openai.com/v1",
-            ),
-            api_key=api_key,
-        )
-    else:
-        raise ValueError(
-            "UPSTREAM_PROVIDER must be 'antigravity' or 'openai_compatible'."
-        )
-
-        app.state.governance_engine = governance_engine or GovernanceEngine(
-            ClaimVerifier(load_corpus())
-        )
-        app.state.cost_breaker = cost_breaker or CostBreaker()
-
-        yield
-
-        await app.state.engine.dispose()
-
-    app = FastAPI(title="ControlPlane Gateway", lifespan=lifespan)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+```
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.policies = load_all_policies()
+    app.state.default_tenant = os.environ.get(
+        "DEFAULT_TENANT", "customer_support"
     )
-    app.include_router(chat_router)
+    app.state.tool_specs = load_tool_specs()
 
-    @app.get("/")
-    @app.get("/healthz")
-    async def healthz():
-        return {"status": "ok", "service": "controlplane-gateway", "tenants": sorted(app.state.policies.keys())}
+    app.state.engine = engine or get_engine()
+    app.state.sessionmaker = get_sessionmaker(app.state.engine)
 
-    return app
+    if run_migrations:
+        await init_models(app.state.engine)
 
+    if provider is not None:
+        app.state.provider = provider
+    else:
+        provider_type = os.environ.get(
+            "UPSTREAM_PROVIDER", "openai_compatible"
+        ).strip().lower()
+        api_key = os.environ.get("UPSTREAM_API_KEY", "")
+
+        if provider_type == "antigravity":
+            app.state.provider = AntigravityProvider(
+                api_key=api_key,
+                agent=os.environ.get(
+                    "ANTIGRAVITY_AGENT",
+                    "antigravity-preview-09-2026",
+                ),
+                model=os.environ.get("ANTIGRAVITY_MODEL") or None,
+                max_total_tokens=int(
+                    os.environ.get(
+                        "ANTIGRAVITY_MAX_TOTAL_TOKENS", "6000"
+                    )
+                ),
+                timeout_s=float(
+                    os.environ.get(
+                        "ANTIGRAVITY_TIMEOUT_SECONDS", "120"
+                    )
+                ),
+            )
+        elif provider_type == "openai_compatible":
+            app.state.provider = OpenAICompatibleProvider(
+                base_url=os.environ.get(
+                    "UPSTREAM_BASE_URL",
+                    "https://api.openai.com/v1",
+                ),
+                api_key=api_key,
+            )
+        else:
+            raise ValueError(
+                "UPSTREAM_PROVIDER must be 'antigravity' "
+                "or 'openai_compatible'."
+            )
+
+    app.state.governance_engine = (
+        governance_engine
+        or GovernanceEngine(ClaimVerifier(load_corpus()))
+    )
+    app.state.cost_breaker = cost_breaker or CostBreaker()
+
+    yield
+
+    await app.state.engine.dispose()
+
+app = FastAPI(title="ControlPlane Gateway", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(chat_router)
+
+@app.get("/")
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": "controlplane-gateway",
+        "tenants": sorted(app.state.policies.keys()),
+    }
+
+return app
+```
 
 app = create_app()
