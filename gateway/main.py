@@ -44,7 +44,7 @@ def _build_provider_from_env() -> Provider:
             ),
             model=os.environ.get("ANTIGRAVITY_MODEL") or None,
             max_total_tokens=int(
-                os.environ.get("ANTIGRAVITY_MAX_TOTAL_TOKENS", "6000")
+                os.environ.get("ANTIGRAVITY_MAX_TOTAL_TOKENS", "12000")
             ),
             timeout_s=float(
                 os.environ.get("ANTIGRAVITY_TIMEOUT_SECONDS", "120")
